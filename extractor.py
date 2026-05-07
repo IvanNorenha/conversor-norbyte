@@ -2,6 +2,10 @@ import streamlit as st
 import pdfplumber
 import pandas as pd
 import io
+import tempfile
+import os
+import zipfile
+from pypdf import PdfReader, PdfWriter
 
 # 1. CONFIGURACIÓN CORPORATIVA
 st.set_page_config(page_title="Conversor Bancario | Norbyte", page_icon="📊", layout="centered")
@@ -14,7 +18,6 @@ st.markdown("""
     header {visibility: hidden;}
     .block-container { padding-bottom: 100px; padding-top: 2rem; }
     
-    /* 1. Ocultar el molesto texto "Press Enter to apply" que tapa el ojo de la contraseña */
     [data-testid="InputInstructions"] {
         display: none !important;
     }
@@ -45,22 +48,20 @@ with col2:
 
 st.markdown("<h3 style='text-align: center; color: #333; margin-bottom: 30px;'>Conversor de Estados de Cuenta a Excel</h3>", unsafe_allow_html=True)
 
-# 4. INTERFAZ MEJORADA (Botones Horizontales y Anti-Gestor de Claves)
-
-# Ahora mostramos los bancos como botones visibles directamente
+# 4. INTERFAZ
 banco_seleccionado = st.radio(
     "🏦 Selecciona el Banco del Estado de Cuenta",
     ("BCP", "BBVA", "Interbank", "Scotiabank"),
     horizontal=True
 )
 
-archivo_subido = st.file_uploader(f"📂 Sube tu PDF del {banco_seleccionado}", type="pdf")
+# ¡MAGIA AQUÍ! allow_multiple_files=True permite seleccionar y arrastrar varios PDFs
+archivos_subidos = st.file_uploader(f"📂 Sube tu(s) PDF(s) del {banco_seleccionado}", type="pdf", accept_multiple_files=True)
 
-# Se agregó autocomplete="new-password" para bloquear el popup de Google/Chrome
 clave_pdf = st.text_input(
     "🔒 Contraseña del PDF (Tu DNI/RUC). Déjalo vacío si no tiene:", 
     type="password", 
-    autocomplete="one-time-code"  # <--- Este es el truco anti-Chrome
+    autocomplete="one-time-code"
 )
 
 titulos_estandar = ["FECHA PROC.", "FECHA VALOR", "DESCRIPCION", "CARGOS / DEBE", "ABONOS / HABER"]
@@ -75,13 +76,41 @@ def a_numero(texto):
         return texto_limpio
 
 # ==========================================
+# EL PURIFICADOR DE BASURA DIGITAL
+# ==========================================
+def limpiar_basura_bancaria(archivo_bytes):
+    inicio_real = archivo_bytes.find(b"%PDF-")
+    if inicio_real != -1:
+        return archivo_bytes[inicio_real:]
+    return archivo_bytes
+
+# ==========================================
+# EL CERRAJERO (Desencriptador Maestro)
+# ==========================================
+def quitar_candado(archivo_bytes, clave):
+    lector = PdfReader(io.BytesIO(archivo_bytes), strict=False)
+    if lector.is_encrypted:
+        if not clave:
+            raise ValueError("Este archivo está protegido. Necesitas ingresar la contraseña (DNI/RUC).")
+        exito = lector.decrypt(clave)
+        if exito == 0: 
+            raise ValueError("Contraseña incorrecta. Por favor ingresa el DNI/RUC válido.")
+            
+    escritor = PdfWriter()
+    for pagina in lector.pages:
+        escritor.add_page(pagina)
+        
+    salida = io.BytesIO()
+    escritor.write(salida)
+    salida.seek(0)
+    return salida.getvalue()
+
+# ==========================================
 # MOTOR 1: BCP
 # ==========================================
-def procesar_bcp(archivo, clave):
+def procesar_bcp(archivo):
     hojas_datos = {}
-    clave_args = {"password": clave} if clave else {}
-    
-    with pdfplumber.open(archivo, **clave_args) as pdf:
+    with pdfplumber.open(archivo) as pdf:
         for i, pagina in enumerate(pdf.pages):
             tabla = pagina.extract_table({"vertical_strategy": "text", "horizontal_strategy": "text"})
             if not tabla: continue
@@ -154,12 +183,11 @@ def procesar_bcp(archivo, clave):
 # ==========================================
 # MOTOR 2: BBVA
 # ==========================================
-def procesar_bbva(archivo, clave):
+def procesar_bbva(archivo):
     hojas_datos = {}
-    clave_args = {"password": clave} if clave else {}
     titulos_bbva = ["FECHA OPER.", "FECHA VALOR", "DESCRIPCION", "CARGO / ABONO"]
     
-    with pdfplumber.open(archivo, **clave_args) as pdf:
+    with pdfplumber.open(archivo) as pdf:
         for i, pagina in enumerate(pdf.pages):
             texto = pagina.extract_text()
             if not texto: continue
@@ -231,24 +259,19 @@ def procesar_bbva(archivo, clave):
 # ==========================================
 # MOTOR 3: INTERBANK
 # ==========================================
-def procesar_interbank(archivo, clave):
+def procesar_interbank(archivo):
     hojas_datos = {}
-    clave_args = {"password": clave} if clave else {}
     titulos_ibk = ["Fecha", "Concepto y/o descripción", "Ingresos", "Gastos"]
     
-    with pdfplumber.open(archivo, **clave_args) as pdf:
+    with pdfplumber.open(archivo) as pdf:
         for i, pagina in enumerate(pdf.pages):
-            # --- DETECTOR Y BLOQUEADOR DE EJEMPLOS/PUBLICIDAD ---
             texto_crudo = pagina.extract_text()
             if texto_crudo:
                 texto_upper = texto_crudo.upper()
-                # AHORA SÍ: Usamos las palabras exactas que aparecen en la hoja 5
                 palabras_clave_ejemplo = ["TE AYUDAMOS A CONOCER", "MARÍA VARA DE GAMARRA", "MARIA VARA DE GAMARRA", "CICLO DE CONSUMO"]
                 if any(key in texto_upper for key in palabras_clave_ejemplo):
-                    continue # Destruye la hoja de ejemplo y pasa a la siguiente
-            # -----------------------------------------------------------
+                    continue 
             
-            # Intento 1: Tabla clásica
             tabla = pagina.extract_table({"vertical_strategy": "text", "horizontal_strategy": "text"})
             filas_limpias = []
             
@@ -276,7 +299,6 @@ def procesar_interbank(archivo, clave):
                         
                         filas_limpias.append([fecha, concepto, ingreso, gasto])
             
-            # Intento 2: Radar de Respaldo Forzado (Si es una hoja rara como la 4)
             if not filas_limpias:
                 palabras = pagina.extract_words()
                 lineas_y = {}
@@ -335,21 +357,18 @@ def procesar_interbank(archivo, clave):
 # ==========================================
 # MOTOR 4: SCOTIABANK
 # ==========================================
-def procesar_scotiabank(archivo, clave):
+def procesar_scotiabank(archivo):
     hojas_datos = {}
-    clave_args = {"password": clave} if clave else {}
-    # Las 5 columnas exactas solicitadas
     titulos_scotia = ["FECHA OPER.", "FECHA VALOR", "DESCRIPCION", "CARGOS", "ABONOS"]
     
-    with pdfplumber.open(archivo, **clave_args) as pdf:
+    with pdfplumber.open(archivo) as pdf:
         for i, pagina in enumerate(pdf.pages):
             palabras = pagina.extract_words()
             if not palabras: continue
 
-            # Agrupamos las palabras en filas exactas usando su coordenada vertical (Y)
             lineas_y = {}
             for p in palabras:
-                y = round(p['top'] / 4) * 4  # Tolerancia milimétrica para alinear el texto
+                y = round(p['top'] / 4) * 4  
                 if y not in lineas_y: lineas_y[y] = []
                 lineas_y[y].append(p)
                 
@@ -359,15 +378,13 @@ def procesar_scotiabank(archivo, clave):
                 words = sorted(lineas_y[y], key=lambda w: w['x0'])
                 if not words: continue
                 
-                # 1. Validar que la fila empiece con una FECHA (Ej: "06/03")
                 w0 = words[0]['text']
                 if len(w0) >= 5 and w0[:2].isdigit() and w0[2] == '/' and w0[3:5].isdigit():
                     fecha_oper = w0[:5]
-                    words.pop(0) # Retiramos la Fecha de Operación de la lista
+                    words.pop(0) 
                     
                     if not words: continue
                     
-                    # 2. Atrapar FECHA VALOR (si existe)
                     w1 = words[0]['text']
                     if len(w1) >= 5 and w1[:2].isdigit() and w1[2] == '/' and w1[3:5].isdigit():
                         fecha_val = w1[:5]
@@ -377,13 +394,11 @@ def procesar_scotiabank(archivo, clave):
                         
                     if not words: continue
                     
-                    # 3. Eliminar la columna ORIG (usualmente 3 dígitos, ej: "784" o "001")
                     if len(words[0]['text']) <= 4 and words[0]['text'].isdigit():
                         words.pop(0)
                         
                     if not words: continue
                     
-                    # 4. El último dato de la derecha en Scotiabank siempre es el SALDO. Lo eliminamos.
                     words.pop() 
                     if not words: continue
                     
@@ -392,14 +407,12 @@ def procesar_scotiabank(archivo, clave):
                     monto_idx = -1
                     monto_val = None
                     
-                    # 5. Escáner de Derecha a Izquierda para cazar el Dinero escondido
                     for idx in range(len(words)-1, -1, -1):
                         txt = words[idx]['text'].replace(",", "")
-                        if txt.endswith("-"): txt = txt[:-1] # Limpiar signos negativos pegados
+                        if txt.endswith("-"): txt = txt[:-1] 
                         
                         try:
                             val = float(txt)
-                            # Asegurar que es dinero real (tiene punto y 2 decimales exactos)
                             if "." in txt and len(txt.split(".")[1]) >= 2:
                                 monto_idx = idx
                                 monto_val = val
@@ -408,18 +421,14 @@ def procesar_scotiabank(archivo, clave):
                             continue
                             
                     if monto_idx != -1:
-                        # Geometría pura: Si el X0 del número está más allá del 74% de la hoja, es ABONO.
                         if words[monto_idx]['x0'] > (pagina.width * 0.74):
                             abono = monto_val
                         else:
                             cargo = monto_val
                             
-                        # Retiramos el dinero de la lista para que no ensucie el texto
                         words.pop(monto_idx)
                         
-                    # 6. Lo que sobra es PURA DESCRIPCIÓN (Concepto + Referencia unidos limpiamente)
                     desc = " ".join([w['text'] for w in words])
-                    
                     filas_limpias.append([fecha_oper, fecha_val, desc, cargo, abono])
                     
             if filas_limpias:
@@ -433,39 +442,82 @@ def procesar_scotiabank(archivo, clave):
     return buffer
 
 # ==========================================
-# EJECUCIÓN PRINCIPAL
+# EJECUCIÓN PRINCIPAL CON PROCESAMIENTO MASIVO
 # ==========================================
-if archivo_subido is not None:
-    if st.button(f"🚀 Convertir PDF de {banco_seleccionado}"):
-        with st.spinner(f"Procesando estructura de {banco_seleccionado}..."):
-            try:
-                buffer_excel = None
+if archivos_subidos:
+    if st.button(f"🚀 Convertir PDF(s) de {banco_seleccionado}"):
+        with st.spinner(f"Procesando {len(archivos_subidos)} archivo(s) de {banco_seleccionado}..."):
+            archivos_exitosos = []
+            errores = []
+
+            for archivo in archivos_subidos:
+                try:
+                    # 1. Limpieza y Desencriptación
+                    bytes_puros = limpiar_basura_bancaria(archivo.getvalue())
+                    archivo_limpio_bytes = quitar_candado(bytes_puros, clave_pdf)
+                    
+                    # 2. Guardamos archivo temporal
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                        tmp.write(archivo_limpio_bytes)
+                        ruta_temporal = tmp.name
+                    
+                    # 3. Procesamiento según el banco
+                    buffer_excel = None
+                    if banco_seleccionado == "BCP":
+                        buffer_excel = procesar_bcp(ruta_temporal)
+                    elif banco_seleccionado == "BBVA":
+                        buffer_excel = procesar_bbva(ruta_temporal)
+                    elif banco_seleccionado == "Interbank":
+                        buffer_excel = procesar_interbank(ruta_temporal)
+                    elif banco_seleccionado == "Scotiabank":
+                        buffer_excel = procesar_scotiabank(ruta_temporal)
+                    
+                    # 4. Eliminamos temporal
+                    try: os.remove(ruta_temporal)
+                    except: pass
+                    
+                    # 5. Guardar resultado (Usando el nombre original del archivo .pdf -> .xlsx)
+                    if buffer_excel is not None:
+                        nombre_original_sin_ext = os.path.splitext(archivo.name)[0]
+                        nombre_excel = f"{nombre_original_sin_ext}.xlsx"
+                        archivos_exitosos.append((nombre_excel, buffer_excel))
+                    else:
+                        errores.append(f"No se encontraron transacciones en: {archivo.name}")
+                        
+                except ValueError as ve:
+                    errores.append(f"🔒 {archivo.name}: {str(ve)}")
+                except Exception as e:
+                    errores.append(f"❌ {archivo.name}: Error interno al procesar.")
+
+            # --- PRESENTACIÓN DE RESULTADOS ---
+            if errores:
+                for err in errores:
+                    st.warning(err)
+                    
+            if archivos_exitosos:
+                st.success(f"¡Se convirtieron exitosamente {len(archivos_exitosos)} documento(s)!")
                 
-                if banco_seleccionado == "BCP":
-                    buffer_excel = procesar_bcp(archivo_subido, clave_pdf)
-                elif banco_seleccionado == "BBVA":
-                    buffer_excel = procesar_bbva(archivo_subido, clave_pdf)
-                elif banco_seleccionado == "Interbank":
-                    buffer_excel = procesar_interbank(archivo_subido, clave_pdf)
-                elif banco_seleccionado == "Scotiabank":
-                    buffer_excel = procesar_scotiabank(archivo_subido, clave_pdf)
-                
-                if buffer_excel is not None:
-                    st.success("¡Conversión exitosa!")
+                # Si es un solo archivo, descarga directa de Excel
+                if len(archivos_exitosos) == 1:
                     st.download_button(
-                        label="📥 Descargar archivo Excel",
-                        data=buffer_excel.getvalue(),
-                        file_name=f"Estado_Cuenta_{banco_seleccionado}.xlsx",
+                        label=f"📥 Descargar {archivos_exitosos[0][0]}",
+                        data=archivos_exitosos[0][1].getvalue(),
+                        file_name=archivos_exitosos[0][0],
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
+                # Si son varios, los metemos todos a un ZIP
                 else:
-                    st.warning(f"⚠️ No se encontraron transacciones legibles. Verifica que el archivo sea un Estado de Cuenta de {banco_seleccionado}.")
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                        for nombre, buffer in archivos_exitosos:
+                            zf.writestr(nombre, buffer.getvalue())
                     
-            except pdfplumber.pdfminer.pdfdocument.PDFPasswordIncorrect:
-                st.error("🔒 Contraseña incorrecta. Por favor ingresa el DNI/RUC válido para abrir este PDF.")
-            except Exception as e:
-                st.error(f"Error interno al procesar el archivo: {str(e)}")
-                st.info("💡 Consejo: Verifica que hayas seleccionado el banco correcto en el menú de arriba.")
+                    st.download_button(
+                        label=f"📦 Descargar {len(archivos_exitosos)} archivos en ZIP",
+                        data=zip_buffer.getvalue(),
+                        file_name=f"Estados_Cuenta_{banco_seleccionado}.zip",
+                        mime="application/zip"
+                    )
 
 st.markdown("""
     <div class="footer-norbyte">
