@@ -10,43 +10,23 @@ from pypdf import PdfReader, PdfWriter
 # 1. CONFIGURACIÓN CORPORATIVA
 st.set_page_config(page_title="Conversor Bancario | Norbyte", page_icon="📊", layout="centered")
 
-# 2. ESTILOS VISUALES (CSS)
-st.markdown("""
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .block-container { padding-bottom: 100px; padding-top: 2rem; }
-    
-    [data-testid="InputInstructions"] {
-        display: none !important;
-    }
-    
-    div.stButton > button:first-child {
-        background-color: #F05A28; color: white; border: none; border-radius: 6px;
-        padding: 10px 24px; font-weight: bold; width: 100%;
-    }
-    div.stButton > button:first-child:hover { background-color: #D94A1D; color: white; }
-    div.stDownloadButton > button:first-child {
-        background-color: #28a745; color: white; border: none; font-weight: bold; width: 100%;
-    }
-    div.stDownloadButton > button:first-child:hover { background-color: #218838; color: white; }
-    .footer-norbyte {
-        text-align: center; margin-top: 40px; padding-top: 20px;
-        border-top: 2px solid #f0f2f6; color: #555; font-size: 0.85em;
-    }
-    </style>
-""", unsafe_allow_html=True)
+# 2. CARGAR ESTILOS EXTERNOS (Conexión con estilos.css)
+def cargar_css(archivo_css):
+    try:
+        with open(archivo_css) as f:
+            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+    except FileNotFoundError:
+        st.warning(f"⚠️ No se encontró el archivo {archivo_css}. El sistema funcionará, pero sin diseño corporativo.")
+
+cargar_css("estilos.css")
 
 # 3. ENCABEZADO Y LOGO
-col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
-    try:
-        st.image("logo_norbyte.png", use_container_width=True)
-    except FileNotFoundError:
-        pass
+try:
+    st.image("logo_norbyte.png", width=220)
+except FileNotFoundError:
+    pass
 
-st.markdown("<h3 style='text-align: center; color: #333; margin-bottom: 30px;'>Conversor de Estados de Cuenta a Excel</h3>", unsafe_allow_html=True)
+st.markdown("<h3 style='text-align: center; color: #333; margin-bottom: 20px;'>Conversor de Estados de Cuenta a Excel</h3>", unsafe_allow_html=True)
 
 # 4. INTERFAZ
 banco_seleccionado = st.radio(
@@ -55,7 +35,6 @@ banco_seleccionado = st.radio(
     horizontal=True
 )
 
-# ¡MAGIA AQUÍ! allow_multiple_files=True permite seleccionar y arrastrar varios PDFs
 archivos_subidos = st.file_uploader(f"📂 Sube tu(s) PDF(s) del {banco_seleccionado}", type="pdf", accept_multiple_files=True)
 
 clave_pdf = st.text_input(
@@ -288,7 +267,6 @@ def procesar_interbank(archivo):
                 if not words: continue
                 
                 w0 = words[0]['text']
-                # Buscamos fila que inicie con Fecha (DD/MM/YYYY)
                 if len(w0) >= 10 and w0[2] == '/' and w0[5] == '/' and w0[:2].isdigit():
                     fecha = w0[:10]
                     words.pop(0)
@@ -298,23 +276,21 @@ def procesar_interbank(archivo):
                     ingreso = None
                     gasto = None
                     
-                    # 1. Eliminar el Saldo Contable (Si está a la extrema derecha)
                     txt_ult = words[-1]['text'].replace(",", "").replace("+", "").replace("-", "")
                     es_saldo = False
                     try:
                         if "." in txt_ult and len(txt_ult.split(".")[1]) >= 2:
                             val_ult = float(txt_ult)
-                            if words[-1]['x0'] > (pagina.width * 0.76): # Está en la columna Saldo de la hoja
+                            if words[-1]['x0'] > (pagina.width * 0.76): 
                                 es_saldo = True
                     except ValueError:
                         pass
                         
                     if es_saldo:
-                        words.pop() # Lo borramos de la fila para no ensuciar
+                        words.pop() 
                         
                     if not words: continue
                     
-                    # 2. Atrapar el Ingreso o Gasto (Ahora debe ser el último elemento)
                     txt_monto_raw = words[-1]['text']
                     txt_monto = txt_monto_raw.replace(",", "")
                     
@@ -334,17 +310,15 @@ def procesar_interbank(archivo):
                             elif is_pos:
                                 ingreso = val
                             else:
-                                # Si Interbank no pone signos en alguna versión, usamos la posición geométrica
                                 if x0_monto < (pagina.width * 0.65):
                                     ingreso = val
                                 else:
                                     gasto = val
                                     
-                            words.pop() # Quitamos el monto para dejar la descripción limpia
+                            words.pop() 
                     except ValueError:
-                        pass # Si no era monto, significa que es parte del texto de descripción
+                        pass 
                         
-                    # 3. Lo que sobra es PURA descripción limpia
                     concepto = " ".join([w['text'] for w in words])
                     filas_limpias.append([fecha, concepto, ingreso, gasto])
                     
@@ -457,16 +431,13 @@ if archivos_subidos:
 
             for archivo in archivos_subidos:
                 try:
-                    # 1. Limpieza y Desencriptación
                     bytes_puros = limpiar_basura_bancaria(archivo.getvalue())
                     archivo_limpio_bytes = quitar_candado(bytes_puros, clave_pdf)
                     
-                    # 2. Guardamos archivo temporal
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                         tmp.write(archivo_limpio_bytes)
                         ruta_temporal = tmp.name
                     
-                    # 3. Procesamiento según el banco
                     buffer_excel = None
                     if banco_seleccionado == "BCP":
                         buffer_excel = procesar_bcp(ruta_temporal)
@@ -477,11 +448,9 @@ if archivos_subidos:
                     elif banco_seleccionado == "Scotiabank":
                         buffer_excel = procesar_scotiabank(ruta_temporal)
                     
-                    # 4. Eliminamos temporal
                     try: os.remove(ruta_temporal)
                     except: pass
                     
-                    # 5. Guardar resultado (Usando el nombre original del archivo .pdf -> .xlsx)
                     if buffer_excel is not None:
                         nombre_original_sin_ext = os.path.splitext(archivo.name)[0]
                         nombre_excel = f"{nombre_original_sin_ext}.xlsx"
@@ -494,7 +463,6 @@ if archivos_subidos:
                 except Exception as e:
                     errores.append(f"❌ {archivo.name}: Error interno al procesar.")
 
-            # --- PRESENTACIÓN DE RESULTADOS ---
             if errores:
                 for err in errores:
                     st.warning(err)
@@ -502,7 +470,6 @@ if archivos_subidos:
             if archivos_exitosos:
                 st.success(f"¡Se convirtieron exitosamente {len(archivos_exitosos)} documento(s)!")
                 
-                # Si es un solo archivo, descarga directa de Excel
                 if len(archivos_exitosos) == 1:
                     st.download_button(
                         label=f"📥 Descargar {archivos_exitosos[0][0]}",
@@ -510,7 +477,6 @@ if archivos_subidos:
                         file_name=archivos_exitosos[0][0],
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
-                # Si son varios, los metemos todos a un ZIP
                 else:
                     zip_buffer = io.BytesIO()
                     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
