@@ -1,0 +1,68 @@
+/* ==========================================
+   ESTILOS VISUALES - NORBYTE (MODO MÓVIL)
+   ========================================== */
+
+/* Ocultar elementos por defecto de Streamlit */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+
+/* 1. REDUCIR ESPACIOS EN BLANCO (ARRIBA Y ABAJO) */
+.block-container { 
+    padding-top: 1rem !important; 
+    padding-bottom: 1rem !important; 
+}
+
+/* 2. CENTRAR EL LOGO */
+[data-testid="stImage"] {
+    display: flex;
+    justify-content: center;
+    margin-top: -10px;
+    margin-bottom: 20px;
+}
+
+/* 3. CENTRAR PREGUNTAS Y TEXTOS */
+[data-testid="stWidgetLabel"] {
+    display: flex !important;
+    justify-content: center !important;
+}
+[data-testid="stWidgetLabel"] p {
+    text-align: center !important;
+    font-weight: 600 !important;
+    width: 100%;
+}
+
+/* 4. SOLUCIÓN A LA DEFORMACIÓN DE LOS BOTONES DE BANCO */
+div[role="radiogroup"] {
+    display: flex !important;
+    flex-wrap: wrap !important; /* Si no caben, bajan a la siguiente línea sin deformarse */
+    justify-content: center !important;
+    gap: 15px !important;
+}
+
+/* 5. Ocultar el texto molesto de la contraseña */
+[data-testid="InputInstructions"] {
+    display: none !important;
+}
+
+/* 6. Diseño de botones principales */
+div.stButton > button:first-child {
+    background-color: #F05A28; color: white; border: none; border-radius: 6px;
+    padding: 10px 24px; font-weight: bold; width: 100%;
+}
+div.stButton > button:first-child:hover { 
+    background-color: #D94A1D; color: white; 
+}
+
+div.stDownloadButton > button:first-child {
+    background-color: #28a745; color: white; border: none; font-weight: bold; width: 100%;
+}
+div.stDownloadButton > button:first-child:hover { 
+    background-color: #218838; color: white; 
+}
+
+/* 7. Pie de página compacto */
+.footer-norbyte {
+    text-align: center; margin-top: 20px; padding-top: 10px;
+    border-top: 2px solid #f0f2f6; color: #555; font-size: 0.85em;
+}
