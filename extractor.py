@@ -272,77 +272,82 @@ def procesar_interbank(archivo):
                 if any(key in texto_upper for key in palabras_clave_ejemplo):
                     continue 
             
-            tabla = pagina.extract_table({"vertical_strategy": "text", "horizontal_strategy": "text"})
+            palabras = pagina.extract_words()
+            if not palabras: continue
+
+            lineas_y = {}
+            for p in palabras:
+                y = round(p['top'] / 4) * 4 
+                if y not in lineas_y: lineas_y[y] = []
+                lineas_y[y].append(p)
+                
             filas_limpias = []
             
-            if tabla:
-                for fila in tabla:
-                    row = [str(c).strip().replace("\n", " ") if c is not None else "" for c in fila]
-                    if not row or not row[0]: continue
+            for y in sorted(lineas_y.keys()):
+                words = sorted(lineas_y[y], key=lambda w: w['x0'])
+                if not words: continue
+                
+                w0 = words[0]['text']
+                # Buscamos fila que inicie con Fecha (DD/MM/YYYY)
+                if len(w0) >= 10 and w0[2] == '/' and w0[5] == '/' and w0[:2].isdigit():
+                    fecha = w0[:10]
+                    words.pop(0)
                     
-                    fecha_str = row[0][:10] 
-                    if len(fecha_str) == 10 and fecha_str[2] == '/' and fecha_str[5] == '/':
-                        fecha = fecha_str
-                        concepto = row[1] if len(row) > 1 else ""
-                        ingreso = None; gasto = None
-                        
-                        if len(row) >= 5:
-                            if row[2]: ingreso = a_numero(row[2])
-                            if row[3]: gasto = a_numero(row[3])
-                        elif len(row) == 4:
-                            monto_str = row[2].replace(",", "").strip()
-                            if monto_str.startswith("-"): gasto = a_numero(monto_str.replace("-", ""))
-                            elif monto_str.startswith("+"): ingreso = a_numero(monto_str.replace("+", ""))
-                            else: 
-                                num = a_numero(monto_str)
-                                if num is not None: ingreso = num
-                        
-                        filas_limpias.append([fecha, concepto, ingreso, gasto])
-            
-            if not filas_limpias:
-                palabras = pagina.extract_words()
-                lineas_y = {}
-                for p in palabras:
-                    y = round(p['top'] / 4) * 4 
-                    if y not in lineas_y: lineas_y[y] = []
-                    lineas_y[y].append(p)
-                    
-                for y in sorted(lineas_y.keys()):
-                    words = sorted(lineas_y[y], key=lambda w: w['x0'])
                     if not words: continue
-                    texto_linea = " ".join([w['text'] for w in words])
                     
-                    if len(texto_linea) >= 10 and texto_linea[2] == '/' and texto_linea[5] == '/':
-                        fecha = words[0]['text'][:10]
-                        if not (fecha[:2].isdigit() and fecha[3:5].isdigit()): continue
+                    ingreso = None
+                    gasto = None
+                    
+                    # 1. Eliminar el Saldo Contable (Si está a la extrema derecha)
+                    txt_ult = words[-1]['text'].replace(",", "").replace("+", "").replace("-", "")
+                    es_saldo = False
+                    try:
+                        if "." in txt_ult and len(txt_ult.split(".")[1]) >= 2:
+                            val_ult = float(txt_ult)
+                            if words[-1]['x0'] > (pagina.width * 0.76): # Está en la columna Saldo de la hoja
+                                es_saldo = True
+                    except ValueError:
+                        pass
                         
-                        if len(words) >= 3:
-                            ult_text = words[-1]['text'].replace(",", "")
-                            pen_text = words[-2]['text'].replace(",", "")
+                    if es_saldo:
+                        words.pop() # Lo borramos de la fila para no ensuciar
+                        
+                    if not words: continue
+                    
+                    # 2. Atrapar el Ingreso o Gasto (Ahora debe ser el último elemento)
+                    txt_monto_raw = words[-1]['text']
+                    txt_monto = txt_monto_raw.replace(",", "")
+                    
+                    is_neg = txt_monto.startswith("-")
+                    is_pos = txt_monto.startswith("+")
+                    
+                    if is_neg or is_pos:
+                        txt_monto = txt_monto[1:]
+                        
+                    try:
+                        if "." in txt_monto and len(txt_monto.split(".")[1]) >= 2:
+                            val = float(txt_monto)
+                            x0_monto = words[-1]['x0']
                             
-                            ult = a_numero(ult_text)
-                            pen = a_numero(pen_text)
-                            
-                            if ult is not None and pen is not None:
-                                x0_monto = words[-2]['x0']
-                                monto = pen
-                                concepto = " ".join([w['text'] for w in words[1:-2]])
-                            elif ult is not None:
-                                x0_monto = words[-1]['x0']
-                                monto = ult
-                                concepto = " ".join([w['text'] for w in words[1:-1]])
+                            if is_neg:
+                                gasto = val
+                            elif is_pos:
+                                ingreso = val
                             else:
-                                continue
-                                
-                            ingreso = None; gasto = None
-                            
-                            if x0_monto < (pagina.width * 0.68):
-                                ingreso = monto
-                            else:
-                                gasto = monto
-                                
-                            filas_limpias.append([fecha, concepto, ingreso, gasto])
-                            
+                                # Si Interbank no pone signos en alguna versión, usamos la posición geométrica
+                                if x0_monto < (pagina.width * 0.65):
+                                    ingreso = val
+                                else:
+                                    gasto = val
+                                    
+                            words.pop() # Quitamos el monto para dejar la descripción limpia
+                    except ValueError:
+                        pass # Si no era monto, significa que es parte del texto de descripción
+                        
+                    # 3. Lo que sobra es PURA descripción limpia
+                    concepto = " ".join([w['text'] for w in words])
+                    filas_limpias.append([fecha, concepto, ingreso, gasto])
+                    
             if filas_limpias:
                 hojas_datos[f"Hoja_{i+1}"] = filas_limpias
 
