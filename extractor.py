@@ -16,7 +16,7 @@ from pypdf import PdfReader, PdfWriter
 st.set_page_config(page_title="Conversor Bancario | Norbyte", page_icon="📊", layout="centered")
 
 # ==========================================
-# 2. ESTILOS VISUALES INCRUSTADOS (EL ÚNICO CSS QUE LEE TU APP)
+# 2. ESTILOS VISUALES INCRUSTADOS (CSS)
 # ==========================================
 estilos_nativos = """
 <style>
@@ -68,28 +68,31 @@ estilos_nativos = """
     div[role="radiogroup"] label:has(input:checked) p { color: #F05A28 !important; font-weight: bold !important; }
 
     /* ==========================================
-       3. CONTRASEÑA Y UPLOADER (NATIVO CON BORDE NORBYTE)
+       3. CONTRASEÑA Y UPLOADER
        ========================================== */
     [data-testid="stTextInput"] {
         max-width: 450px !important; margin: 0 auto !important;
     }
     [data-testid="stWidgetLabel"] { display: none !important; }
     
-    /* Diseño del uploader (Borde naranja, manteniendo el texto nativo) */
+    /* FULMINAR MENSAJE "Press Enter to apply" DEL OJO */
+    [data-testid="InputInstructions"] { display: none !important; }
+    
+    /* Diseño del uploader (Borde naranja) */
     .stFileUploader section {
         border: 2px dashed #F05A28 !important;
         background-color: #fcfcfc !important;
         border-radius: 10px !important;
         padding: 20px !important;
         max-width: 450px !important;
-        margin: 0 auto !important; /* Centra la caja horizontalmente */
+        margin: 0 auto !important;
     }
     .stFileUploader section:hover {
         background-color: #FFF2ED !important;
     }
 
     /* ==========================================
-       4. BOTONES Y ALERTAS (Colores y Centrado Interno)
+       4. BOTONES Y ALERTAS
        ========================================== */
     [data-testid="stAlert"] > div {
         display: flex !important; justify-content: center !important; 
@@ -120,7 +123,7 @@ estilos_nativos = """
 st.markdown(estilos_nativos, unsafe_allow_html=True)
 
 # ==========================================
-# 3. ENCABEZADO Y LOGO (PROPORCIÓN CORRECTA)
+# 3. ENCABEZADO Y LOGO
 # ==========================================
 col1, col2, col3 = st.columns([0.2, 2.5, 0.2])
 with col2:
@@ -189,49 +192,78 @@ def quitar_candado(archivo_bytes, clave):
 def procesar_bcp(archivo):
     hojas_datos = {}
     with pdfplumber.open(archivo) as pdf:
+        texto_p1 = pdf.pages[0].extract_text()
+        es_empresa = texto_p1 and ("CUENTA CORRIENTE" in texto_p1.upper() or "CUENTA EMPRESA" in texto_p1.upper())
+        
         for i, pagina in enumerate(pdf.pages):
-            tabla = pagina.extract_table({"vertical_strategy": "text", "horizontal_strategy": "text"})
-            if not tabla: continue
-            filas_limpias = []
-            guardar = False
-            for fila in tabla:
-                fila_str = [str(c).strip() if c is not None else "" for c in fila]
-                if not fila_str: continue
-                texto_fila = " ".join(fila_str).upper()
-                if "FECHA" in texto_fila and "PROC" in texto_fila:
-                    guardar = True; continue
-                if not guardar:
-                    if "SALDO ANTERIOR" in texto_fila: guardar = True
-                    elif len(fila_str) > 0:
-                        inicio = fila_str[0].replace(" ", "")
-                        if len(inicio) >= 5 and inicio[:2].isdigit() and inicio[2:5].isalpha(): guardar = True
-                if "TOTAL MOVIMIENTO" in texto_fila or ("SALDO" in texto_fila and "ANTERIOR" not in texto_fila):
-                    guardar = False; continue
-                if guardar:
-                    if not "".join(fila_str).strip(): continue
-                    if "SALDO ANTERIOR" in texto_fila:
-                        monto = ""
-                        for celda in reversed(fila_str):
-                            if "." in celda and any(d.isdigit() for d in celda): monto = celda; break
-                        filas_limpias.append(["", "", "SALDO ANTERIOR", None, a_numero(monto)])
-                        continue
-                    if len(fila_str) < 2 or (not fila_str[0].strip() and not fila_str[1].strip()): continue
-                    if " " in fila_str[0]:
-                        partes = fila_str[0].split(" ", 1)
-                        if len(partes[0]) >= 5 and partes[0][:2].isdigit():
-                            fila_str[0] = partes[0]; fila_str.insert(1, partes[1])
-                    if len(fila_str) >= 3 and fila_str[1].strip().isdigit() and len(fila_str[1].strip()) == 2:
-                        texto_desc = fila_str[2].strip()
-                        meses = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","SET","OCT","NOV","DIC"]
-                        if len(texto_desc) >= 3 and texto_desc[:3].upper() in meses:
-                            fila_str[1] = fila_str[1].strip() + texto_desc[:3].upper()
-                            fila_str[2] = texto_desc[3:].strip()
-                    while len(fila_str) < 5: fila_str.append("")
-                    abono = a_numero(fila_str[-1])
-                    cargo = a_numero(fila_str[-2])
-                    desc = " ".join([c for c in fila_str[2:-2] if c])
-                    filas_limpias.append([fila_str[0], fila_str[1], desc, cargo, abono])
-            if filas_limpias: hojas_datos[f"Hoja_{i+1}"] = filas_limpias
+            if es_empresa:
+                texto = pagina.extract_text()
+                if not texto: continue
+                filas_limpias = []
+                lineas = texto.split('\n')
+                for linea in lineas:
+                    linea = linea.strip()
+                    if not linea: continue
+                    partes = linea.split()
+                    if len(partes) >= 3 and len(partes[0]) == 5 and partes[0][:2].isdigit() and partes[0][2] == '-':
+                        fecha = partes[0]
+                        monto_raw = partes[-2].replace(',', '') 
+                        is_neg = monto_raw.endswith('-')
+                        monto_str = monto_raw[:-1] if is_neg else monto_raw
+                        try:
+                            monto_val = float(monto_str)
+                        except ValueError:
+                            continue 
+                        cargo = monto_val if is_neg else None
+                        abono = monto_val if not is_neg else None
+                        desc = " ".join(partes[1:-2])
+                        filas_limpias.append([fecha, fecha, desc, cargo, abono])
+                if filas_limpias:
+                    hojas_datos[f"Hoja_{i+1}"] = filas_limpias
+            else:
+                tabla = pagina.extract_table({"vertical_strategy": "text", "horizontal_strategy": "text"})
+                if not tabla: continue
+                filas_limpias = []
+                guardar = False
+                for fila in tabla:
+                    fila_str = [str(c).strip() if c is not None else "" for c in fila]
+                    if not fila_str: continue
+                    texto_fila = " ".join(fila_str).upper()
+                    if "FECHA" in texto_fila and "PROC" in texto_fila:
+                        guardar = True; continue
+                    if not guardar:
+                        if "SALDO ANTERIOR" in texto_fila: guardar = True
+                        elif len(fila_str) > 0:
+                            inicio = fila_str[0].replace(" ", "")
+                            if len(inicio) >= 5 and inicio[:2].isdigit() and inicio[2:5].isalpha(): guardar = True
+                    if "TOTAL MOVIMIENTO" in texto_fila or ("SALDO" in texto_fila and "ANTERIOR" not in texto_fila):
+                        guardar = False; continue
+                    if guardar:
+                        if not "".join(fila_str).strip(): continue
+                        if "SALDO ANTERIOR" in texto_fila:
+                            monto = ""
+                            for celda in reversed(fila_str):
+                                if "." in celda and any(d.isdigit() for d in celda): monto = celda; break
+                            filas_limpias.append(["", "", "SALDO ANTERIOR", None, a_numero(monto)])
+                            continue
+                        if len(fila_str) < 2 or (not fila_str[0].strip() and not fila_str[1].strip()): continue
+                        if " " in fila_str[0]:
+                            partes = fila_str[0].split(" ", 1)
+                            if len(partes[0]) >= 5 and partes[0][:2].isdigit():
+                                fila_str[0] = partes[0]; fila_str.insert(1, partes[1])
+                        if len(fila_str) >= 3 and fila_str[1].strip().isdigit() and len(fila_str[1].strip()) == 2:
+                            texto_desc = fila_str[2].strip()
+                            meses = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","SET","OCT","NOV","DIC"]
+                            if len(texto_desc) >= 3 and texto_desc[:3].upper() in meses:
+                                fila_str[1] = fila_str[1].strip() + texto_desc[:3].upper()
+                                fila_str[2] = texto_desc[3:].strip()
+                        while len(fila_str) < 5: fila_str.append("")
+                        abono = a_numero(fila_str[-1])
+                        cargo = a_numero(fila_str[-2])
+                        desc = " ".join([c for c in fila_str[2:-2] if c])
+                        filas_limpias.append([fila_str[0], fila_str[1], desc, cargo, abono])
+                if filas_limpias: 
+                    hojas_datos[f"Hoja_{i+1}"] = filas_limpias
     if not hojas_datos: return None
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
@@ -241,7 +273,8 @@ def procesar_bcp(archivo):
 
 def procesar_bbva(archivo):
     hojas_datos = {}
-    titulos_bbva = ["FECHA OPER.", "FECHA VALOR", "DESCRIPCION", "CARGO / ABONO"]
+    titulos_bbva = ["FECHA OPER.", "FECHA VALOR", "DESCRIPCION", "CARGOS", "ABONOS"]
+    
     with pdfplumber.open(archivo) as pdf:
         for i, pagina in enumerate(pdf.pages):
             texto = pagina.extract_text()
@@ -249,14 +282,17 @@ def procesar_bbva(archivo):
             filas_limpias = []
             lineas = texto.split('\n')
             current_oper = ""; current_val = ""
+            
             for linea in lineas:
                 linea = linea.strip()
                 if not linea: continue
                 linea_upper = linea.upper()
                 if any(x in linea_upper for x in ["BANCA POR","SALDO A NUESTRO","SALDO A SU","WWW.BBVA","EN CASO DE RECLAMOS","ROGAMOS VERIFIQUE","OF. JOCKEY"]): break
                 if linea_upper.startswith("DNI"): break
+                
                 partes = linea.split()
                 if not partes: continue
+                
                 es_fecha = len(partes[0]) == 5 and partes[0][:2].isdigit() and partes[0][2] == '-' and partes[0][3:].isdigit()
                 if es_fecha:
                     current_oper = partes[0]
@@ -267,77 +303,145 @@ def procesar_bbva(archivo):
                 else:
                     if not current_oper: continue
                     inicio_desc = 0
+                
+                cargo = None
+                abono = None
+                
                 if "SALDO ANTERIOR" in linea.upper():
-                    desc = "SALDO ANTERIOR"; cargo_abono = ""
+                    desc = "SALDO ANTERIOR"
                 else:
                     if len(partes) >= inicio_desc + 2:
-                        monto = partes[-2]
-                        if any(c.isdigit() for c in monto) and ("." in monto or "," in monto):
-                            cargo_abono = monto; desc = " ".join(partes[inicio_desc:-2])
-                        else:
-                            cargo_abono = ""; desc = " ".join(partes[inicio_desc:])
-                    else:
-                        cargo_abono = ""; desc = " ".join(partes[inicio_desc:])
+                        monto_raw = partes[-2]
+                        if any(c.isdigit() for c in monto_raw) and ("." in monto_raw or "," in monto_raw):
+                            desc = " ".join(partes[inicio_desc:-2])
+                            monto_clean = monto_raw.replace(',', '')
+                            is_neg = monto_clean.endswith('-')
+                            monto_str = monto_clean[:-1] if is_neg else monto_clean
+                            try:
+                                monto_val = float(monto_str)
+                                if is_neg: cargo = monto_val
+                                else: abono = monto_val
+                            except ValueError: pass
+                        else: desc = " ".join(partes[inicio_desc:])
+                    else: desc = " ".join(partes[inicio_desc:])
+                        
                 if "FECHA" in desc or "DESCRIPCION" in desc or "SALDO CONTABLE" in desc: continue
-                filas_limpias.append([current_oper, current_val, desc, cargo_abono])
+                filas_limpias.append([current_oper, current_val, desc, cargo, abono])
+                
             if filas_limpias: hojas_datos[f"Hoja_{i+1}"] = filas_limpias
+            
     if not hojas_datos: return None
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        for hoja, filas in hojas_datos.items(): pd.DataFrame(filas, columns=titulos_bbva).to_excel(writer, sheet_name=hoja, index=False)
+        for hoja, filas in hojas_datos.items(): 
+            pd.DataFrame(filas, columns=titulos_bbva).to_excel(writer, sheet_name=hoja, index=False)
     return buffer
 
 def procesar_interbank(archivo):
     hojas_datos = {}
-    titulos_ibk = ["Fecha", "Concepto y/o descripción", "Ingresos", "Gastos"]
+    titulos_ibk = ["Fecha", "Concepto y/o descripción", "Gastos", "Ingresos"]
+    
     with pdfplumber.open(archivo) as pdf:
+        texto_p1 = pdf.pages[0].extract_text()
+        es_empresa = texto_p1 and ("ESTADO DE CUENTA NEGOCIOS" in texto_p1.upper() or "PARA EMPRESAS" in texto_p1.upper())
+
         for i, pagina in enumerate(pdf.pages):
-            texto_crudo = pagina.extract_text()
-            if texto_crudo:
-                texto_upper = texto_crudo.upper()
-                palabras_clave_ejemplo = ["TE AYUDAMOS A CONOCER","MARÍA VARA DE GAMARRA","MARIA VARA DE GAMARRA","CICLO DE CONSUMO"]
-                if any(key in texto_upper for key in palabras_clave_ejemplo): continue
-            palabras = pagina.extract_words()
-            if not palabras: continue
-            lineas_y = {}
-            for p in palabras:
-                y = round(p['top'] / 4) * 4
-                if y not in lineas_y: lineas_y[y] = []
-                lineas_y[y].append(p)
-            filas_limpias = []
-            for y in sorted(lineas_y.keys()):
-                words = sorted(lineas_y[y], key=lambda w: w['x0'])
-                if not words: continue
-                w0 = words[0]['text']
-                if len(w0) >= 10 and w0[2] == '/' and w0[5] == '/' and w0[:2].isdigit():
-                    fecha = w0[:10]; words.pop(0)
+            if es_empresa:
+                palabras = pagina.extract_words()
+                if not palabras: continue
+                lineas_y = {}
+                for p in palabras:
+                    y = round(p['top'] / 4) * 4
+                    if y not in lineas_y: lineas_y[y] = []
+                    lineas_y[y].append(p)
+                
+                filas_limpias = []
+                for y in sorted(lineas_y.keys()):
+                    words = sorted(lineas_y[y], key=lambda w: w['x0'])
                     if not words: continue
-                    ingreso = None; gasto = None
-                    txt_ult = words[-1]['text'].replace(",","").replace("+","").replace("-","")
-                    es_saldo = False
-                    try:
+                    w0 = words[0]['text']
+                    
+                    if len(w0) == 5 and w0[:2].isdigit() and w0[2] == '/' and w0[3:].isdigit():
+                        fecha = w0; words.pop(0)
+                        if not words: continue
+                        w1 = words[0]['text']
+                        if len(w1) == 5 and w1[:2].isdigit() and w1[2] == '/' and w1[3:].isdigit():
+                            words.pop(0)
+                        if not words: continue
+                        
+                        ingreso = None; gasto = None
+                        txt_ult = words[-1]['text'].replace(",","").replace("-","")
                         if "." in txt_ult and len(txt_ult.split(".")[1]) >= 2:
-                            if words[-1]['x0'] > (pagina.width * 0.76): es_saldo = True
-                    except ValueError: pass
-                    if es_saldo: words.pop()
+                            if words[-1]['x0'] > (pagina.width * 0.75): words.pop()
+                        if not words: continue
+                        
+                        txt_monto_raw = words[-1]['text']
+                        txt_monto_clean = txt_monto_raw.replace(',', '')
+                        is_neg = txt_monto_clean.startswith('-') or txt_monto_clean.endswith('-')
+                        monto_str = txt_monto_clean.replace('-', '') 
+                        try:
+                            if "." in monto_str and len(monto_str.split(".")[1]) >= 2:
+                                val = float(monto_str)
+                                if is_neg: gasto = val 
+                                else: ingreso = val 
+                                words.pop() 
+                        except ValueError: pass
+                            
+                        concepto = " ".join([w['text'] for w in words])
+                        filas_limpias.append([fecha, concepto, gasto, ingreso])
+                if filas_limpias: hojas_datos[f"Hoja_{i+1}"] = filas_limpias
+
+            else:
+                texto_crudo = pagina.extract_text()
+                if texto_crudo:
+                    texto_upper = texto_crudo.upper()
+                    palabras_clave_ejemplo = ["TE AYUDAMOS A CONOCER","MARÍA VARA DE GAMARRA","MARIA VARA DE GAMARRA","CICLO DE CONSUMO"]
+                    if any(key in texto_upper for key in palabras_clave_ejemplo): continue
+                
+                palabras = pagina.extract_words()
+                if not palabras: continue
+                lineas_y = {}
+                for p in palabras:
+                    y = round(p['top'] / 4) * 4
+                    if y not in lineas_y: lineas_y[y] = []
+                    lineas_y[y].append(p)
+                
+                filas_limpias = []
+                for y in sorted(lineas_y.keys()):
+                    words = sorted(lineas_y[y], key=lambda w: w['x0'])
                     if not words: continue
-                    txt_monto_raw = words[-1]['text']
-                    txt_monto = txt_monto_raw.replace(",","")
-                    is_neg = txt_monto.startswith("-"); is_pos = txt_monto.startswith("+")
-                    if is_neg or is_pos: txt_monto = txt_monto[1:]
-                    try:
-                        if "." in txt_monto and len(txt_monto.split(".")[1]) >= 2:
-                            val = float(txt_monto); x0_monto = words[-1]['x0']
-                            if is_neg: gasto = val
-                            elif is_pos: ingreso = val
-                            else:
-                                if x0_monto < (pagina.width * 0.65): ingreso = val
-                                else: gasto = val
-                            words.pop()
-                    except ValueError: pass
-                    concepto = " ".join([w['text'] for w in words])
-                    filas_limpias.append([fecha, concepto, ingreso, gasto])
-            if filas_limpias: hojas_datos[f"Hoja_{i+1}"] = filas_limpias
+                    w0 = words[0]['text']
+                    
+                    if len(w0) >= 10 and w0[2] == '/' and w0[5] == '/' and w0[:2].isdigit():
+                        fecha = w0[:10]; words.pop(0)
+                        if not words: continue
+                        ingreso = None; gasto = None
+                        txt_ult = words[-1]['text'].replace(",","").replace("+","").replace("-","")
+                        es_saldo = False
+                        try:
+                            if "." in txt_ult and len(txt_ult.split(".")[1]) >= 2:
+                                if words[-1]['x0'] > (pagina.width * 0.76): es_saldo = True
+                        except ValueError: pass
+                        if es_saldo: words.pop()
+                        if not words: continue
+                        txt_monto_raw = words[-1]['text']
+                        txt_monto = txt_monto_raw.replace(",","")
+                        is_neg = txt_monto.startswith("-"); is_pos = txt_monto.startswith("+")
+                        if is_neg or is_pos: txt_monto = txt_monto[1:]
+                        try:
+                            if "." in txt_monto and len(txt_monto.split(".")[1]) >= 2:
+                                val = float(txt_monto); x0_monto = words[-1]['x0']
+                                if is_neg: gasto = val
+                                elif is_pos: ingreso = val
+                                else:
+                                    if x0_monto < (pagina.width * 0.65): ingreso = val
+                                    else: gasto = val
+                                words.pop()
+                        except ValueError: pass
+                        concepto = " ".join([w['text'] for w in words])
+                        filas_limpias.append([fecha, concepto, gasto, ingreso])
+                if filas_limpias: hojas_datos[f"Hoja_{i+1}"] = filas_limpias
+                
     if not hojas_datos: return None
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
@@ -401,7 +505,6 @@ def procesar_scotiabank(archivo):
 # ==========================================
 if archivos_subidos:
     
-    # 1. BOTÓN DE CONVERSIÓN CENTRADO NATIVAMENTE CON COLUMNAS
     col_btn_izq, col_btn_cen, col_btn_der = st.columns([1, 2, 1])
     with col_btn_cen:
         ejecutar = st.button(f"🚀 Convertir PDF(s) de {banco_seleccionado}", use_container_width=True)
@@ -438,13 +541,9 @@ if archivos_subidos:
                 for err in errores: st.warning(err)
 
             if archivos_exitosos:
-                
-                # 2. ALERTA VERDE Y BOTÓN DE DESCARGA CENTRADOS NATIVAMENTE CON COLUMNAS
                 col_alerta_izq, col_alerta_cen, col_alerta_der = st.columns([1, 2, 1])
-                
                 with col_alerta_cen:
                     st.success(f"✅ ¡Se convirtieron {len(archivos_exitosos)} documento(s)!")
-                    
                     if len(archivos_exitosos) == 1:
                         st.download_button(
                             label=f"📥 Descargar {archivos_exitosos[0][0]}",
