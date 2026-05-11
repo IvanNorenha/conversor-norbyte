@@ -1,68 +1,150 @@
 /* ==========================================
-   ESTILOS VISUALES - NORBYTE (MODO MÓVIL)
+   ESTILOS VISUALES - NORBYTE (WEB Y MÓVIL)
    ========================================== */
 
-/* Ocultar elementos por defecto de Streamlit */
+/* --- OCULTAR ELEMENTOS POR DEFECTO DE STREAMLIT --- */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
 header {visibility: hidden;}
+[data-testid="stHeader"] { display: none !important; }
 
-/* 1. REDUCIR ESPACIOS EN BLANCO (ARRIBA Y ABAJO) */
-.block-container { 
-    padding-top: 1rem !important; 
-    padding-bottom: 1rem !important; 
+/* ==========================================
+   1. ESPACIOS GENERALES Y LOGO (TAMAÑO Y ACERCAMIENTO)
+   ========================================== */
+/* Reducir espacio superior para que todo encaje en 1 pantalla */
+.block-container {
+    padding-top: 1.5rem !important;
+    padding-bottom: 2rem !important;
 }
 
-/* 2. CENTRAR EL LOGO */
+/* Forzar tamaño del logo y pegarlo al título */
 [data-testid="stImage"] {
-    display: flex;
-    justify-content: center;
-    margin-top: -10px;
-    margin-bottom: 20px;
-}
-
-/* 3. CENTRAR PREGUNTAS Y TEXTOS */
-[data-testid="stWidgetLabel"] {
     display: flex !important;
     justify-content: center !important;
-}
-[data-testid="stWidgetLabel"] p {
-    text-align: center !important;
-    font-weight: 600 !important;
-    width: 100%;
+    margin-bottom: -25px !important; /* MARGEN NEGATIVO: ACERCA EL LOGO AL TÍTULO */
 }
 
-/* 4. SOLUCIÓN A LA DEFORMACIÓN DE LOS BOTONES DE BANCO */
+/* Obligar al logo a ser más grande (350px) por fuerza bruta CSS */
+[data-testid="stImage"] img {
+    width: 350px !important; 
+    max-width: 100% !important;
+}
+
+/* ==========================================
+   2. TÍTULOS
+   ========================================== */
+.titulo-centrado {
+    text-align: center; font-weight: 600; color: #2C3E50;
+    margin-bottom: 5px; font-size: 1.1rem; margin-top: 15px;
+}
+.subtitulo-centrado {
+    text-align: center; font-size: 0.85em; color: #7f8c8d; margin-bottom: 15px;
+}
+
+/* ==========================================
+   3. TARJETAS DE BANCOS
+   ========================================== */
 div[role="radiogroup"] {
+    display: flex !important; flex-wrap: wrap !important;
+    justify-content: center !important; gap: 15px !important;
+}
+div[role="radiogroup"] label div[data-baseweb="radio"] { display: none !important; }
+div[role="radiogroup"] label {
+    border: 2px solid #E0E6ED !important; background-color: #FFFFFF !important;
+    padding: 12px 24px !important; border-radius: 10px !important;
+    cursor: pointer !important; transition: all 0.3s ease !important;
+    min-width: 130px; display: flex; justify-content: center;
+}
+div[role="radiogroup"] label:hover { border-color: #F05A28 !important; background-color: #FFF2ED !important; }
+div[role="radiogroup"] label:has(input:checked) {
+    border-color: #F05A28 !important; background-color: #FFF2ED !important;
+    box-shadow: 0px 4px 10px rgba(240, 90, 40, 0.2) !important;
+}
+div[role="radiogroup"] label:has(input:checked) p { color: #F05A28 !important; font-weight: bold !important; }
+
+/* ==========================================
+   4. UPLOADER (ELIMINAR INGLÉS) Y CAJAS TEXTO
+   ========================================== */
+[data-testid="stFileUploader"], [data-testid="stTextInput"] {
+    max-width: 450px !important; margin: 0 auto !important;
+}
+[data-testid="stWidgetLabel"] { display: none !important; }
+[data-testid="InputInstructions"] { display: none !important; }
+
+/* 1. Fulminar el texto en inglés "Limit 200MB per file" nativo */
+[data-testid="stFileUploadDropzone"] small,
+[data-testid="stFileUploadDropzone"] span[data-testid="stMarkdownContainer"] { 
+    display: none !important; 
+}
+
+/* 2. Truco de tinta invisible para el botón: Ocultamos "Upload" y ponemos "Subir PDF" */
+[data-testid="stFileUploadDropzone"] button {
+    color: transparent !important; /* Vuelve invisible la palabra Upload */
+    position: relative;
+}
+[data-testid="stFileUploadDropzone"] button::before {
+    content: "Subir PDF(s)" !important; /* Nuestro texto en español */
+    color: #333 !important;             /* Color real de la letra */
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%); /* Centrado perfecto matemático */
+    font-weight: 600;
+    visibility: visible !important;
+}
+
+/* 3. Inyectar obligatoriamente nuestro texto de peso límite en español */
+[data-testid="stFileUploadDropzone"]::after {
+    content: "Límite: 100 MB por archivo • Formato PDF" !important;
+    display: block !important;
+    text-align: center !important;
+    color: #7f8c8d !important;
+    font-size: 0.85rem !important;
+    margin-top: 10px !important;
+}
+
+/* ==========================================
+   5. DISEÑO DE BOTONES/ALERTA (Centrado por Python)
+   ========================================== */
+
+/* Apuntamos al texto y al check "✓" que están adentro de la caja verde de éxito */
+[data-testid="stAlert"] > div {
+    /* Volvemos el interior de la caja verde flexible */
     display: flex !important;
-    flex-wrap: wrap !important; /* Si no caben, bajan a la siguiente línea sin deformarse */
+    /* Centramos el texto horizontalmente */
     justify-content: center !important;
-    gap: 15px !important;
+    /* Alineamos el check "✓" y el texto a la misma altura vertical */
+    align-items: center !important;
 }
 
-/* 5. Ocultar el texto molesto de la contraseña */
-[data-testid="InputInstructions"] {
-    display: none !important;
+/* --- COLORES DEL BOTÓN NARANJA (CONVERTIR) --- */
+div.stButton > button { 
+    background-color: #F05A28 !important; /* Fondo naranja Norbyte */
+    color: white !important;              /* Letras blancas */
+    border: none !important;              /* Quitamos el borde por defecto */
+    border-radius: 8px !important;        /* Esquinas redondeadas */
+    padding: 12px 30px !important;        /* Altura y relleno interno del botón */
+    font-weight: bold !important;         /* Letra negrita */
 }
+/* Color cuando el mouse pasa por encima */
+div.stButton > button:hover { background-color: #D94A1D !important; }
 
-/* 6. Diseño de botones principales */
-div.stButton > button:first-child {
-    background-color: #F05A28; color: white; border: none; border-radius: 6px;
-    padding: 10px 24px; font-weight: bold; width: 100%;
+/* --- COLORES DEL BOTÓN VERDE (DESCARGAR) --- */
+div.stDownloadButton > button { 
+    background-color: #28a745 !important; /* Fondo verde éxito */
+    color: white !important;              /* Letras blancas */
+    border: none !important;              /* Quitamos borde */
+    border-radius: 8px !important;        /* Esquinas redondeadas */
+    padding: 12px 30px !important;        /* Altura y relleno */
+    font-weight: bold !important;         /* Letra negrita */
 }
-div.stButton > button:first-child:hover { 
-    background-color: #D94A1D; color: white; 
-}
+/* Color cuando el mouse pasa por encima */
+div.stDownloadButton > button:hover { background-color: #218838 !important; }
 
-div.stDownloadButton > button:first-child {
-    background-color: #28a745; color: white; border: none; font-weight: bold; width: 100%;
-}
-div.stDownloadButton > button:first-child:hover { 
-    background-color: #218838; color: white; 
-}
-
-/* 7. Pie de página compacto */
+/* ==========================================
+   6. FOOTER
+   ========================================== */
 .footer-norbyte {
-    text-align: center; margin-top: 20px; padding-top: 10px;
+    text-align: center; margin-top: 40px; padding-top: 20px;
     border-top: 2px solid #f0f2f6; color: #555; font-size: 0.85em;
 }
