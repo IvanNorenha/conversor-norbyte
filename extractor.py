@@ -221,6 +221,23 @@ def procesar_bcp(archivo):
                 if filas_limpias:
                     hojas_datos[f"Hoja_{i+1}"] = filas_limpias
             else:
+                # ==================================================
+                # FIX HOJA 1: Recorte inteligente para omitir el encabezado gigante
+                # ==================================================
+                if i == 0:
+                    crop_y = 0
+                    words = pagina.extract_words()
+                    for idx, w in enumerate(words):
+                        # Buscamos las palabras "FECHA" y "PROC" juntas
+                        if w['text'] == 'FECHA' and idx + 1 < len(words) and 'PROC' in words[idx+1]['text']:
+                            crop_y = max(0, w['top'] - 10) # Cortamos 10 píxeles arriba de la cabecera
+                            break
+                    
+                    # Aplicamos el corte a la página si encontramos la cabecera
+                    if crop_y > 0:
+                        pagina = pagina.crop((0, crop_y, pagina.width, pagina.height))
+                # ==================================================
+
                 tabla = pagina.extract_table({"vertical_strategy": "text", "horizontal_strategy": "text"})
                 if not tabla: continue
                 filas_limpias = []
