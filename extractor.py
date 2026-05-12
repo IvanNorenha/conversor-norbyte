@@ -221,22 +221,16 @@ def procesar_bcp(archivo):
                 if filas_limpias:
                     hojas_datos[f"Hoja_{i+1}"] = filas_limpias
             else:
-                # ==================================================
-                # FIX HOJA 1: Recorte inteligente para omitir el encabezado gigante
-                # ==================================================
+                # FIX HOJA 1: Recorte inteligente
                 if i == 0:
                     crop_y = 0
                     words = pagina.extract_words()
                     for idx, w in enumerate(words):
-                        # Buscamos las palabras "FECHA" y "PROC" juntas
                         if w['text'] == 'FECHA' and idx + 1 < len(words) and 'PROC' in words[idx+1]['text']:
-                            crop_y = max(0, w['top'] - 10) # Cortamos 10 píxeles arriba de la cabecera
+                            crop_y = max(0, w['top'] - 10)
                             break
-                    
-                    # Aplicamos el corte a la página si encontramos la cabecera
                     if crop_y > 0:
                         pagina = pagina.crop((0, crop_y, pagina.width, pagina.height))
-                # ==================================================
 
                 tabla = pagina.extract_table({"vertical_strategy": "text", "horizontal_strategy": "text"})
                 if not tabla: continue
@@ -246,6 +240,7 @@ def procesar_bcp(archivo):
                     fila_str = [str(c).strip() if c is not None else "" for c in fila]
                     if not fila_str: continue
                     texto_fila = " ".join(fila_str).upper()
+                    
                     if "FECHA" in texto_fila and "PROC" in texto_fila:
                         guardar = True; continue
                     if not guardar:
@@ -253,8 +248,10 @@ def procesar_bcp(archivo):
                         elif len(fila_str) > 0:
                             inicio = fila_str[0].replace(" ", "")
                             if len(inicio) >= 5 and inicio[:2].isdigit() and inicio[2:5].isalpha(): guardar = True
+                            
                     if "TOTAL MOVIMIENTO" in texto_fila or ("SALDO" in texto_fila and "ANTERIOR" not in texto_fila):
                         guardar = False; continue
+                        
                     if guardar:
                         if not "".join(fila_str).strip(): continue
                         if "SALDO ANTERIOR" in texto_fila:
@@ -263,24 +260,60 @@ def procesar_bcp(archivo):
                                 if "." in celda and any(d.isdigit() for d in celda): monto = celda; break
                             filas_limpias.append(["", "", "SALDO ANTERIOR", None, a_numero(monto)])
                             continue
+                            
                         if len(fila_str) < 2 or (not fila_str[0].strip() and not fila_str[1].strip()): continue
+                        
                         if " " in fila_str[0]:
                             partes = fila_str[0].split(" ", 1)
                             if len(partes[0]) >= 5 and partes[0][:2].isdigit():
                                 fila_str[0] = partes[0]; fila_str.insert(1, partes[1])
+                                
                         if len(fila_str) >= 3 and fila_str[1].strip().isdigit() and len(fila_str[1].strip()) == 2:
                             texto_desc = fila_str[2].strip()
                             meses = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","SET","OCT","NOV","DIC"]
                             if len(texto_desc) >= 3 and texto_desc[:3].upper() in meses:
                                 fila_str[1] = fila_str[1].strip() + texto_desc[:3].upper()
                                 fila_str[2] = texto_desc[3:].strip()
+                                
                         while len(fila_str) < 5: fila_str.append("")
-                        abono = a_numero(fila_str[-1])
-                        cargo = a_numero(fila_str[-2])
-                        desc = " ".join([c for c in fila_str[2:-2] if c])
-                        filas_limpias.append([fila_str[0], fila_str[1], desc, cargo, abono])
+                        
+                        # ==================================================
+                        # NUEVO FILTRO ANTI-INVASIÓN DE TEXTO
+                        # ==================================================
+                        abono_raw = str(fila_str[-1]).strip()
+                        cargo_raw = str(fila_str[-2]).strip()
+                        desc_parts = [str(c).strip() for c in fila_str[2:-2] if str(c).strip()]
+                        
+                        cargo_val = None
+                        abono_val = None
+                        
+                        # Evaluar Columna Cargo
+                        if cargo_raw:
+                            c_clean = cargo_raw.replace(',', '')
+                            # Si tiene punto decimal, es dinero. Si no, es texto invasor.
+                            if '.' in c_clean:
+                                try: cargo_val = float(c_clean)
+                                except ValueError: desc_parts.append(cargo_raw)
+                            else:
+                                desc_parts.append(cargo_raw)
+                                
+                        # Evaluar Columna Abono
+                        if abono_raw:
+                            a_clean = abono_raw.replace(',', '')
+                            if '.' in a_clean:
+                                try: abono_val = float(a_clean)
+                                except ValueError: desc_parts.append(abono_raw)
+                            else:
+                                desc_parts.append(abono_raw)
+                                
+                        # Volvemos a pegar la descripción sanada
+                        desc = " ".join(desc_parts)
+                        
+                        filas_limpias.append([fila_str[0], fila_str[1], desc, cargo_val, abono_val])
+                        
                 if filas_limpias: 
                     hojas_datos[f"Hoja_{i+1}"] = filas_limpias
+                    
     if not hojas_datos: return None
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
