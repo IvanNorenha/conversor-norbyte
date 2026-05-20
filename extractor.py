@@ -268,17 +268,37 @@ def procesar_bcp(archivo):
                             if len(partes[0]) >= 5 and partes[0][:2].isdigit():
                                 fila_str[0] = partes[0]; fila_str.insert(1, partes[1])
                                 
-                        if len(fila_str) >= 3 and fila_str[1].strip().isdigit() and len(fila_str[1].strip()) == 2:
-                            texto_desc = fila_str[2].strip()
-                            meses = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","SET","OCT","NOV","DIC"]
-                            if len(texto_desc) >= 3 and texto_desc[:3].upper() in meses:
-                                fila_str[1] = fila_str[1].strip() + texto_desc[:3].upper()
-                                fila_str[2] = texto_desc[3:].strip()
+                        # ==================================================
+                        # NUEVO CANDADO: FECHA VALOR (5 CARACTERES)
+                        # ==================================================
+                        if len(fila_str) >= 3:
+                            # Unimos la columna de fecha valor y descripción para sanar cualquier corte erróneo
+                            texto_unido = (str(fila_str[1]).strip() + " " + str(fila_str[2]).strip()).strip()
+                            texto_sin_espacios = texto_unido.replace(" ", "")
+                            
+                            # Validamos si los primeros 5 caracteres forman una fecha real
+                            if len(texto_sin_espacios) >= 5 and texto_sin_espacios[:2].isdigit() and texto_sin_espacios[2:5].isalpha():
+                                meses = ["ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","SET","OCT","NOV","DIC"]
+                                if texto_sin_espacios[2:5].upper() in meses:
+                                    # Forzamos la fecha perfecta a la columna 2
+                                    fila_str[1] = texto_sin_espacios[:5].upper()
+                                    
+                                    # Buscamos exactamente dónde terminan esos 5 caracteres en el texto original
+                                    chars_found = 0
+                                    cut_index = 0
+                                    for idx, char in enumerate(texto_unido):
+                                        if char != " ": chars_found += 1
+                                        if chars_found == 5:
+                                            cut_index = idx + 1
+                                            break
+                                    # El resto del texto se va limpio a la columna 3 (Descripción)
+                                    fila_str[2] = texto_unido[cut_index:].strip()
+                        # ==================================================
                                 
                         while len(fila_str) < 5: fila_str.append("")
                         
                         # ==================================================
-                        # NUEVO FILTRO ANTI-INVASIÓN DE TEXTO
+                        # FILTRO ANTI-INVASIÓN DE TEXTO
                         # ==================================================
                         abono_raw = str(fila_str[-1]).strip()
                         cargo_raw = str(fila_str[-2]).strip()
@@ -287,17 +307,14 @@ def procesar_bcp(archivo):
                         cargo_val = None
                         abono_val = None
                         
-                        # Evaluar Columna Cargo
                         if cargo_raw:
                             c_clean = cargo_raw.replace(',', '')
-                            # Si tiene punto decimal, es dinero. Si no, es texto invasor.
                             if '.' in c_clean:
                                 try: cargo_val = float(c_clean)
                                 except ValueError: desc_parts.append(cargo_raw)
                             else:
                                 desc_parts.append(cargo_raw)
                                 
-                        # Evaluar Columna Abono
                         if abono_raw:
                             a_clean = abono_raw.replace(',', '')
                             if '.' in a_clean:
@@ -306,7 +323,6 @@ def procesar_bcp(archivo):
                             else:
                                 desc_parts.append(abono_raw)
                                 
-                        # Volvemos a pegar la descripción sanada
                         desc = " ".join(desc_parts)
                         
                         filas_limpias.append([fila_str[0], fila_str[1], desc, cargo_val, abono_val])
