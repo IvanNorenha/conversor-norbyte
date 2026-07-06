@@ -353,12 +353,15 @@ def procesar_bbva(archivo):
                 linea = linea.strip()
                 if not linea: continue
                 linea_upper = linea.upper()
-                if any(x in linea_upper for x in ["BANCA POR","SALDO A NUESTRO","SALDO A SU","WWW.BBVA","EN CASO DE RECLAMOS","ROGAMOS VERIFIQUE","OF. JOCKEY"]): break
+                
+                # Omitir cabeceras y pies de página
+                if any(x in linea_upper for x in ["BANCA POR", "SALDO A NUESTRO", "SALDO A SU", "WWW.BBVA", "EN CASO DE RECLAMOS", "ROGAMOS VERIFIQUE", "OF. JOCKEY"]): break
                 if linea_upper.startswith("DNI"): break
                 
                 partes = linea.split()
                 if not partes: continue
                 
+                # Identificar fechas
                 es_fecha = len(partes[0]) == 5 and partes[0][:2].isdigit() and partes[0][2] == '-' and partes[0][3:].isdigit()
                 if es_fecha:
                     current_oper = partes[0]
@@ -372,24 +375,48 @@ def procesar_bbva(archivo):
                 
                 cargo = None
                 abono = None
+                desc = ""
                 
-                if "SALDO ANTERIOR" in linea.upper():
+                if "SALDO ANTERIOR" in linea_upper:
                     desc = "SALDO ANTERIOR"
                 else:
-                    if len(partes) >= inicio_desc + 2:
-                        monto_raw = partes[-2]
-                        if any(c.isdigit() for c in monto_raw) and ("." in monto_raw or "," in monto_raw):
-                            desc = " ".join(partes[inicio_desc:-2])
-                            monto_clean = monto_raw.replace(',', '')
-                            is_neg = monto_clean.endswith('-')
-                            monto_str = monto_clean[:-1] if is_neg else monto_clean
-                            try:
-                                monto_val = float(monto_str)
-                                if is_neg: cargo = monto_val
-                                else: abono = monto_val
-                            except ValueError: pass
-                        else: desc = " ".join(partes[inicio_desc:])
-                    else: desc = " ".join(partes[inicio_desc:])
+                    if len(partes) >= inicio_desc + 3:
+                        # LÓGICA INVERSA: Determinar si existe ITF evaluando si partes[-3] es un monto decimal
+                        if ('.' in partes[-3] or ',' in partes[-3]) and any(c.isdigit() for c in partes[-3]):
+                            # Fila CON ITF: ... [Nro Oper] [Cargo/Abono] [ITF] [Saldo]
+                            monto_raw = partes[-3]
+                            fin_desc_idx = -5 # Cortamos antes del CAN (-5)
+                        else:
+                            # Fila SIN ITF: ... [Nro Oper] [Cargo/Abono] [Saldo]
+                            monto_raw = partes[-2]
+                            fin_desc_idx = -4 # Cortamos antes del CAN (-4)
+                            
+                        # Limpiar formato numérico y asignar a Cargo o Abono
+                        monto_clean = monto_raw.replace(',', '')
+                        is_neg = monto_clean.endswith('-')
+                        monto_str = monto_clean[:-1] if is_neg else monto_clean
+                        
+                        try:
+                            monto_val = float(monto_str)
+                            if is_neg: cargo = monto_val
+                            else: abono = monto_val
+                        except ValueError:
+                            pass
+                        
+                        # Unir la descripción descartando CAN, Nro Operación, Montos y Saldos
+                        desc_lista = partes[inicio_desc:fin_desc_idx]
+                        desc_str = " ".join(desc_lista)
+                        
+                        # Limpiar las oficinas comunes que quedan pegadas al final de la descripción
+                        oficinas_comunes = ["REC Y DOMICIL", "MOSHOQUEQUE", "BANCA MOVIL", "CHICLAYO", "RE"]
+                        for ofi in oficinas_comunes:
+                            if desc_str.endswith(ofi):
+                                desc_str = desc_str[:-len(ofi)].strip()
+                                break
+                        
+                        desc = desc_str
+                    else:
+                        desc = " ".join(partes[inicio_desc:])
                         
                 if "FECHA" in desc or "DESCRIPCION" in desc or "SALDO CONTABLE" in desc: continue
                 filas_limpias.append([current_oper, current_val, desc, cargo, abono])
